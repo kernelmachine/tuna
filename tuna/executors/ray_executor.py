@@ -8,8 +8,8 @@ from ray.tune import register_trainable, run_experiments
 from ray.tune.function_runner import StatusReporter
 from tuna.executors import Executor
 from tuna.runners import Runner
-
 from typing import Dict, Optional, Any, Callable
+
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
@@ -78,10 +78,11 @@ class RayExecutor(Executor):
             help="hyperparameter search strategy used by Ray-Tune",
         )
         parser.add_argument(
-            "--hyperparameters",
-            type=argparse.FileType("r"),
+            "--search_config",
+            "-e",
+            type=str,
             required=True,
-            help="path to file describing the hyperparameter search space",
+            help="name of dict describing the hyperparameter search space",
         )
         parser.add_argument(
             "--num-samples",
@@ -100,9 +101,7 @@ class RayExecutor(Executor):
         default_args: argparse.Namespace,
         run_args: Optional[argparse.Namespace] = None,
     ) -> None:
-        hyperparam_config = json.load(default_args.hyperparameters)
-        logger.info(f"Hyperparameter Configuration: {hyperparam_config}")
-
+        
         logger.info(
             f"Init Ray with {default_args.num_cpus} CPUs "
             + f"and {default_args.num_gpus} GPUs."
@@ -119,7 +118,7 @@ class RayExecutor(Executor):
                     "cpu": default_args.cpus_per_trial,
                     "gpu": default_args.gpus_per_trial,
                 },
-                "config": hyperparam_config,
+                "config": None,
                 "local_dir": default_args.log_dir,
                 "num_samples": default_args.num_samples,
             }

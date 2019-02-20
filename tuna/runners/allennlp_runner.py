@@ -9,11 +9,15 @@ from allennlp.common.params import Params, parse_overrides, with_fallback
 from allennlp.commands.train import train_model
 from allennlp.common.util import import_submodules
 from tuna.runners import Runner
+from tuna.random_search import HyperparameterSearch
+from tuna.search_environments import SEARCH_ENVIRONMENTS
 
 from typing import Optional
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
+def is_s3_url(path):
+    return path[:1] == 's3'
 
 class AllenNlpRunner(Runner):
     name = "AllenNLP"
@@ -27,6 +31,7 @@ class AllenNlpRunner(Runner):
             type=os.path.abspath,
             help="path to parameter file describing the model to be trained",
         )
+        
         parser.add_argument(
             "--include-package",
             type=str,
@@ -61,33 +66,37 @@ class AllenNlpRunner(Runner):
                 import_submodules(package_name)
 
             run_parameters = {k: json.dumps(v) for k, v in config.items()}
+            search_config = SEARCH_ENVIRONMENTS[default_args.search_config]
+            search_space = HyperparameterSearch(**search_config)
+            sample = search_space.sample()
+            logger.info(f"Hyperparameter Configuration: {sample}")
 
-            file_dict = json.loads(
+            for k, v in sample.items():
+                sample[k] = str(v)
+                os.environ[k] = str(v)
+
+            params_dict = json.loads(
                 _jsonnet.evaluate_snippet(
-                    "config", parameter_file_snippet, tla_codes=run_parameters
+                    "config", parameter_file_snippet, tla_codes=run_parameters, ext_vars=sample
                 )
             )
             if default_args.num_gpus == 0:
                 logger.warning(f"No GPU specified, using CPU.")
-                file_dict["trainer"]["cuda_device"] = -1
-
-            overrides_dict = parse_overrides(run_args.overrides)
-
-            params_dict = with_fallback(preferred=overrides_dict, fallback=file_dict)
+                params_dict["trainer"]["cuda_device"] = -1
 
             # Make sure path is absolute (as Ray workers do not use the same working dir)
             train_data_path = params_dict["train_data_path"]
             validation_data_path = params_dict.get("validation_data_path")
 
-            if not os.path.isabs(train_data_path):
-                params_dict["train_data_path"] = os.path.abspath(
-                    os.path.join(default_args.cwd, train_data_path)
-                )
+            # if not os.path.isabs(train_data_path) and not is_s3_url(train_data_path):
+            #     params_dict["train_data_path"] = os.path.abspath(
+            #         os.path.join(default_args.cwd, train_data_path)
+            #     )
 
-            if validation_data_path and not os.path.isabs(validation_data_path):
-                params_dict["validation_data_path"] = os.path.abspath(
-                    os.path.join(default_args.cwd, validation_data_path)
-                )
+            # if validation_data_path and not os.path.isabs(validation_data_path) and not is_s3_url(validation_data_path):
+            #     params_dict["validation_data_path"] = os.path.abspath(
+            #         os.path.join(default_args.cwd, validation_data_path)
+            #     )
 
             params = Params(params_dict)
 
